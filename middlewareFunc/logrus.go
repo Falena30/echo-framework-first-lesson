@@ -23,7 +23,7 @@ func MakeLogEntry(ctx echo.Context) *log.Entry {
 
 func MiddleWareLogging(ctx echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		MakeLogEntry(c).Info("Upcoming Request")
+		MakeLogEntry(c).Info("Incoming Request")
 		return ctx(c)
 	}
 }

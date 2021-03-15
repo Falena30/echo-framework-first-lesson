@@ -5,9 +5,11 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/go-playground/validator"
 	"github.com/labstack/echo/v4"
+	log "github.com/sirupsen/logrus"
 )
 
 type M map[string]interface{}
@@ -42,6 +44,36 @@ func (R *Renderer) Render(w io.Writer, name string, data interface{}, ctx echo.C
 	return R.Templete.ExecuteTemplate(w, name, data)
 }
 
+func MakeLogEntry(ctx echo.Context) *log.Entry {
+	if ctx == nil {
+		return log.WithFields(log.Fields{"at": time.Now().Format("2006-01-02 15:04:05")})
+	}
+	return log.WithFields(log.Fields{
+		"at":     time.Now().Format("2006-01-02 15:04:05"),
+		"method": ctx.Request().Method,
+		"uri":    ctx.Request().URL.String(),
+		"ip":     ctx.Request().RemoteAddr,
+	})
+}
+
+func MiddleWareLogging(ctx echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		MakeLogEntry(c).Info("Incoming Request")
+		return ctx(c)
+	}
+}
+
+func ErrHandler(err error, ctx echo.Context) {
+	report, ok := err.(*echo.HTTPError)
+	if !ok {
+		report.Message = fmt.Sprintf("http error %d - %v", report.Code, report.Message)
+	} else {
+		report = echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	MakeLogEntry(ctx).Error(report.Message)
+	ctx.HTML(report.Code, report.Message.(string))
+}
+
 type CustomValidator struct {
 	Validator *validator.Validate
 }
@@ -62,6 +94,18 @@ type User struct {
 
 func main() {
 	r := echo.New()
+
+	/*
+		//Penggunaan middleware sebagai logger
+		r.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
+			//Format di ganti sesuai dengan keinginan
+			//sebisa mungkin tarus paling atas
+			Format: "method=${method}, uri=${uri}, status=${status}\n",
+		}))
+	*/
+
+	r.Use(MiddleWareLogging)
+	r.HTTPErrorHandler = ErrHandler
 
 	r.GET("/index", func(ctx echo.Context) error {
 		data := "Hello from /index"
@@ -194,7 +238,18 @@ func main() {
 			return c.JSON(http.StatusOK, true)
 		})
 	*/
+	lock := make(chan error)
+	go func(lock chan error) {
+		lock <- r.Start(":9000")
+	}(lock)
+	time.Sleep(1 * time.Millisecond)
+	MakeLogEntry(nil).Warning("Apps started without ssl/tls enabled")
 
-	fmt.Println("Server start at 9000")
-	r.Start(":9000")
+	err := <-lock
+	if err != nil {
+		MakeLogEntry(nil).Panic("Failed to start apps")
+	}
+
+	//fmt.Println("Server start at 9000")
+	//r.Start(":9000")
 }
